@@ -1,6 +1,6 @@
 /*
  * ZeroTier One - Network Virtualization Everywhere
- * Copyright (C) 2011-2018  ZeroTier, Inc.
+ * Copyright (C) 2011-2019  ZeroTier, Inc.  https://www.zerotier.com/
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,7 +13,15 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --
+ *
+ * You can be released from the requirements of the license by purchasing
+ * a commercial license. Buying such a license is mandatory as soon as you
+ * develop commercial closed-source software that incorporates or links
+ * directly against ZeroTier software without disclosing the source code
+ * of your own application.
  */
 
 #ifndef ZT_SQLITENETWORKCONTROLLER_HPP
@@ -44,13 +52,15 @@
 
 #include "DB.hpp"
 #include "FileDB.hpp"
-#ifdef ZT_CONTROLLER_USE_RETHINKDB
-#include "RethinkDB.hpp"
+#ifdef ZT_CONTROLLER_USE_LIBPQ
+#include "PostgreSQL.hpp"
 #endif
 
 namespace ZeroTier {
 
 class Node;
+
+struct MQConfig;
 
 class EmbeddedNetworkController : public NetworkController
 {
@@ -59,7 +69,7 @@ public:
 	 * @param node Parent node
 	 * @param dbPath Database path (file path or database credentials)
 	 */
-	EmbeddedNetworkController(Node *node,const char *dbPath);
+	EmbeddedNetworkController(Node *node,const char *dbPath, int listenPort, MQConfig *mqc = NULL);
 	virtual ~EmbeddedNetworkController();
 
 	virtual void init(const Identity &signingId,Sender *sender);
@@ -141,17 +151,23 @@ private:
 	};
 
 	const int64_t _startTime;
+	int _listenPort;
 	Node *const _node;
 	std::string _path;
 	Identity _signingId;
 	std::string _signingIdAddressString;
 	NetworkController::Sender *_sender;
+
 	std::unique_ptr<DB> _db;
 	BlockingQueue< _RQEntry * > _queue;
+
 	std::vector<std::thread> _threads;
 	std::mutex _threads_l;
+
 	std::unordered_map< _MemberStatusKey,_MemberStatus,_MemberStatusHash > _memberStatus;
 	std::mutex _memberStatus_l;
+
+	MQConfig *_mqc;
 };
 
 } // namespace ZeroTier

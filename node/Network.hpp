@@ -1,6 +1,6 @@
 /*
  * ZeroTier One - Network Virtualization Everywhere
- * Copyright (C) 2011-2018  ZeroTier, Inc.  https://www.zerotier.com/
+ * Copyright (C) 2011-2019  ZeroTier, Inc.  https://www.zerotier.com/
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
  *
  * --
  *
@@ -132,7 +132,8 @@ public:
 		const uint8_t *frameData,
 		const unsigned int frameLen,
 		const unsigned int etherType,
-		const unsigned int vlanId);
+		const unsigned int vlanId,
+		uint8_t &qosBucket);
 
 	/**
 	 * Apply filters to an incoming packet
@@ -290,6 +291,11 @@ public:
 	}
 
 	/**
+	 * @return True if QoS is in effect for this network
+	 */
+	inline bool qosEnabled() { return false; }
+
+	/**
 	 * Set a bridge route
 	 *
 	 * @param mac MAC address of destination
@@ -359,7 +365,7 @@ public:
 	inline void pushCredentialsNow(void *tPtr,const Address &to,const int64_t now)
 	{
 		Mutex::Lock _l(_lock);
-		_membership(to).pushCredentials(RR,tPtr,now,to,_config,-1,true);
+		_membership(to).pushCredentials(RR,tPtr,now,to,_config,-1);
 	}
 
 	/**
@@ -438,6 +444,6 @@ private:
 	AtomicCounter __refCount;
 };
 
-} // naemspace ZeroTier
+} // namespace ZeroTier
 
 #endif

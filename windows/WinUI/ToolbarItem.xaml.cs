@@ -45,10 +45,6 @@ namespace WinUI
 
         private ObservableCollection<MenuItem> _networkCollection = new ObservableCollection<MenuItem>();
 
-        private static Boolean shouldShowOnboardProcess = true;
-#if DEBUG
-        private static bool isFirstRun = true;
-#endif
 
         public ObservableCollection<MenuItem> NetworkCollection
         {
@@ -85,23 +81,6 @@ namespace WinUI
         {
             if (networks != null)
             {
-                if (networks.Count > 0)
-                {
-#if DEBUG
-                    if (isFirstRun)
-                    {
-                        shouldShowOnboardProcess = true;
-                        isFirstRun = false;
-                    }
-                    else
-                    {
-                        shouldShowOnboardProcess = false;
-                    } 
-#else
-                    shouldShowOnboardProcess = false;
-#endif
-                }
-
                 Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(() =>
                 {
                     NetworkCollection.Clear();
@@ -116,18 +95,6 @@ namespace WinUI
                         NetworkCollection.Add(item);
                     }
                 }));
-
-                if (shouldShowOnboardProcess)
-                {
-                    // TODO: Show onboarding process window (on main thread
-                    Dispatcher.BeginInvoke(DispatcherPriority.Normal, new Action(() =>
-                    {
-                        PageSwitcher ps = new PageSwitcher();
-                        ps.Show();
-                    }));
-
-                    shouldShowOnboardProcess = false;
-                }
             }
         }
 
@@ -140,6 +107,15 @@ namespace WinUI
                     nodeIdMenuItem.Header = "Node ID: " + status.Address;
                     nodeIdMenuItem.IsEnabled = true;
                     nodeId = status.Address;
+
+                    if (CentralAPI.Instance.HasAccessToken())
+                    {
+                        newNetworkItem.IsEnabled = true;
+                    }
+                    else
+                    {
+                        newNetworkItem.IsEnabled = false;
+                    }
                 }));
             }
         }
@@ -328,6 +304,21 @@ namespace WinUI
                         APIHandler.Instance.JoinNetwork(Dispatcher, network.NetworkId, network.AllowManaged, network.AllowGlobal, network.AllowDefault);
                     }
                 }   
+            }
+        }
+
+        private async void ToolbarItem_NewNetwork(object sender, System.Windows.RoutedEventArgs e)
+        {
+            if (CentralAPI.Instance.HasAccessToken())
+            {
+                CentralAPI api = CentralAPI.Instance;
+                CentralNetwork newNetwork = await api.CreateNewNetwork();
+
+                APIHandler handler = APIHandler.Instance;
+                handler.JoinNetwork(this.Dispatcher, newNetwork.Id);
+
+                string nodeId = APIHandler.Instance.NodeAddress();
+                bool authorized = await CentralAPI.Instance.AuthorizeNode(nodeId, newNetwork.Id);
             }
         }
 

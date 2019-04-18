@@ -65,7 +65,8 @@ const OPEN_BLOCK_KEYWORDS = {
 	'tee': true,
 	'watch': true,
 	'redirect': true,
-	'break': true
+	'break': true,
+	'priority': true
 };
 
 // Reserved words that can't be used as tag, capability, or rule set names
@@ -81,6 +82,7 @@ const RESERVED_WORDS = {
 	'watch': true,
 	'redirect': true,
 	'break': true,
+	'priority': true,
 
 	'ztsrc': true,
 	'ztdest': true,
@@ -131,6 +133,7 @@ const KEYWORD_TO_API_MAP = {
 	'watch': 'ACTION_WATCH',
 	'redirect': 'ACTION_REDIRECT',
 	'break': 'ACTION_BREAK',
+	'priority': 'ACTION_PRIORITY',
 
 	'ztsrc': 'MATCH_SOURCE_ZEROTIER_ADDRESS',
 	'ztdest': 'MATCH_DEST_ZEROTIER_ADDRESS',
@@ -226,12 +229,16 @@ function _cleanMac(m)
 {
 	m = m.toLowerCase();
 	var m2 = '';
+	let charcount = 0;
 	for(let i=0;((i<m.length)&&(m2.length<17));++i) {
 		let c = m.charAt(i);
 		if ("0123456789abcdef".indexOf(c) >= 0) {
 			m2 += c;
-			if ((m2.length > 0)&&(m2.length !== 17)&&((m2.length & 1) === 0))
+			charcount++;
+			if ((m2.length > 0)&&(m2.length !== 17)&&(charcount >= 2) ) {
 				m2 += ':';
+				charcount=0;
+			}
 		}
 	}
 	return m2;

@@ -1,6 +1,6 @@
 /*
  * ZeroTier One - Network Virtualization Everywhere
- * Copyright (C) 2011-2018  ZeroTier, Inc.  https://www.zerotier.com/
+ * Copyright (C) 2011-2019  ZeroTier, Inc.  https://www.zerotier.com/
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
  *
  * --
  *
@@ -58,8 +58,10 @@
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
+#ifndef ZT_NO_CAPABILITIES
 #include <linux/capability.h>
 #include <linux/securebits.h>
+#endif
 #endif
 #endif
 
@@ -630,13 +632,9 @@ static int cli(int argc,char **argv)
 		}
 	} else if (command == "get") {
 		if (arg1.length() != 16) {
-			cliPrintHelp(argv[0],stderr);
+			fprintf(stderr,"invalid network ID format, must be a 16-digit hexidecimal number\n");
 			return 2;
 		}
-		char jsons[1024], cl[128];
-		OSUtils::ztsnprintf(cl,sizeof(cl),"%u",(unsigned int)strlen(jsons));
-		requestHeaders["Content-Type"] = "application/json";
-		requestHeaders["Content-Length"] = cl;
 		const unsigned int scode = Http::GET(1024 * 1024 * 16,60000,(const struct sockaddr *)&addr,"/network",requestHeaders,responseHeaders,responseBody);
 
 		if (scode == 0) {
@@ -654,15 +652,20 @@ static int cli(int argc,char **argv)
 			printf("%u %s invalid JSON response (unknown exception)" ZT_EOL_S,scode,command.c_str());
 			return 1;
 		}
+		bool bNetworkFound = false;
 		if (j.is_array()) {
 			for(unsigned long i=0;i<j.size();++i) {
 				nlohmann::json &n = j[i];
 				if (n.is_object()) {
 					if (n["id"] == arg1) {
 						printf("%s\n", OSUtils::jsonString(n[arg2],"-").c_str());
+						bNetworkFound = true;
 					}
 				}
 			}
+		}
+		if (!bNetworkFound) {
+			fprintf(stderr,"unknown network ID, check that you are a member of the network\n");
 		}
 		if (scode == 200) {
 			return 0;
@@ -972,7 +975,7 @@ static void _sighandlerQuit(int sig)
 #endif
 
 // Drop privileges on Linux, if supported by libc etc. and "zerotier-one" user exists on system
-#ifdef __LINUX__
+#if defined(__LINUX__) && !defined(ZT_NO_CAPABILITIES)
 #ifndef PR_CAP_AMBIENT
 #define PR_CAP_AMBIENT 47
 #define PR_CAP_AMBIENT_IS_SET 1
@@ -1351,12 +1354,14 @@ int main(int argc,char **argv)
 #ifdef __UNIX_LIKE__
 	signal(SIGHUP,&_sighandlerHup);
 	signal(SIGPIPE,SIG_IGN);
+	signal(SIGIO,SIG_IGN);
 	signal(SIGUSR1,SIG_IGN);
 	signal(SIGUSR2,SIG_IGN);
 	signal(SIGALRM,SIG_IGN);
 	signal(SIGINT,&_sighandlerQuit);
 	signal(SIGTERM,&_sighandlerQuit);
 	signal(SIGQUIT,&_sighandlerQuit);
+	signal(SIGINT,&_sighandlerQuit);
 
 	/* Ensure that there are no inherited file descriptors open from a previous
 	 * incarnation. This is a hack to ensure that GitHub issue #61 or variants

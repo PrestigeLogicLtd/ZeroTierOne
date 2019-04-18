@@ -1,6 +1,6 @@
 /*
  * ZeroTier One - Network Virtualization Everywhere
- * Copyright (C) 2011-2018  ZeroTier, Inc
+ * Copyright (C) 2011-2019  ZeroTier, Inc.  https://www.zerotier.com/
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,7 +13,15 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --
+ *
+ * You can be released from the requirements of the license by purchasing
+ * a commercial license. Buying such a license is mandatory as soon as you
+ * develop commercial closed-source software that incorporates or links
+ * directly against ZeroTier software without disclosing the source code
+ * of your own application.
  */
 
 #include <stdint.h>
@@ -336,14 +344,14 @@ static bool _parseRule(json &r,ZT_VirtualNetworkRule &rule)
 	} else if (t == "MATCH_IPV6_SOURCE") {
 		rule.t |= ZT_NETWORK_RULE_MATCH_IPV6_SOURCE;
 		InetAddress ip(OSUtils::jsonString(r["ip"],"::0").c_str());
-		ZT_FAST_MEMCPY(rule.v.ipv6.ip,reinterpret_cast<struct sockaddr_in6 *>(&ip)->sin6_addr.s6_addr,16);
+		memcpy(rule.v.ipv6.ip,reinterpret_cast<struct sockaddr_in6 *>(&ip)->sin6_addr.s6_addr,16);
 		rule.v.ipv6.mask = Utils::ntoh(reinterpret_cast<struct sockaddr_in6 *>(&ip)->sin6_port) & 0xff;
 		if (rule.v.ipv6.mask > 128) rule.v.ipv6.mask = 128;
 		return true;
 	} else if (t == "MATCH_IPV6_DEST") {
 		rule.t |= ZT_NETWORK_RULE_MATCH_IPV6_DEST;
 		InetAddress ip(OSUtils::jsonString(r["ip"],"::0").c_str());
-		ZT_FAST_MEMCPY(rule.v.ipv6.ip,reinterpret_cast<struct sockaddr_in6 *>(&ip)->sin6_addr.s6_addr,16);
+		memcpy(rule.v.ipv6.ip,reinterpret_cast<struct sockaddr_in6 *>(&ip)->sin6_addr.s6_addr,16);
 		rule.v.ipv6.mask = Utils::ntoh(reinterpret_cast<struct sockaddr_in6 *>(&ip)->sin6_port) & 0xff;
 		if (rule.v.ipv6.mask > 128) rule.v.ipv6.mask = 128;
 		return true;
@@ -456,11 +464,13 @@ static bool _parseRule(json &r,ZT_VirtualNetworkRule &rule)
 
 } // anonymous namespace
 
-EmbeddedNetworkController::EmbeddedNetworkController(Node *node,const char *dbPath) :
+EmbeddedNetworkController::EmbeddedNetworkController(Node *node,const char *dbPath, int listenPort, MQConfig *mqc) :
 	_startTime(OSUtils::now()),
+	_listenPort(listenPort),
 	_node(node),
 	_path(dbPath),
-	_sender((NetworkController::Sender *)0)
+	_sender((NetworkController::Sender *)0),
+	_mqc(mqc)
 {
 }
 
@@ -478,9 +488,9 @@ void EmbeddedNetworkController::init(const Identity &signingId,Sender *sender)
 	_signingId = signingId;
 	_sender = sender;
 	_signingIdAddressString = signingId.address().toString(tmp);
-#ifdef ZT_CONTROLLER_USE_RETHINKDB
-	if ((_path.length() > 10)&&(_path.substr(0,10) == "rethinkdb:"))
-		_db.reset(new RethinkDB(this,_signingId,_path.c_str()));
+#ifdef ZT_CONTROLLER_USE_LIBPQ
+	if ((_path.length() > 9)&&(_path.substr(0,9) == "postgres:"))
+		_db.reset(new PostgreSQL(this,_signingId,_path.substr(9).c_str(), _listenPort, _mqc));
 	else // else use FileDB after endif
 #endif
 		_db.reset(new FileDB(this,_signingId,_path.c_str()));
@@ -551,7 +561,7 @@ unsigned int EmbeddedNetworkController::handleControlPlaneHttpGET(
 							for(auto member=members.begin();member!=members.end();++member) {
 								mid = (*member)["id"];
 								char tmp[128];
-								OSUtils::ztsnprintf(tmp,sizeof(tmp),"%s\"%s\":%llu",(responseBody.length() > 1) ? ",\"" : "\"",mid.c_str(),(unsigned long long)OSUtils::jsonInt((*member)["revision"],0));
+								OSUtils::ztsnprintf(tmp,sizeof(tmp),"%s\"%s\":%llu",(responseBody.length() > 1) ? "," : "",mid.c_str(),(unsigned long long)OSUtils::jsonInt((*member)["revision"],0));
 								responseBody.append(tmp);
 							}
 						}
@@ -596,10 +606,11 @@ unsigned int EmbeddedNetworkController::handleControlPlaneHttpGET(
 		// Controller status
 
 		char tmp[4096];
-		OSUtils::ztsnprintf(tmp,sizeof(tmp),"{\n\t\"controller\": true,\n\t\"apiVersion\": %d,\n\t\"clock\": %llu\n}\n",ZT_NETCONF_CONTROLLER_API_VERSION,(unsigned long long)OSUtils::now());
+		const bool dbOk = _db->isReady();
+		OSUtils::ztsnprintf(tmp,sizeof(tmp),"{\n\t\"controller\": true,\n\t\"apiVersion\": %d,\n\t\"clock\": %llu,\n\t\"databaseReady\": %s\n}\n",ZT_NETCONF_CONTROLLER_API_VERSION,(unsigned long long)OSUtils::now(),dbOk ? "true" : "false");
 		responseBody = tmp;
 		responseContentType = "application/json";
-		return 200;
+		return dbOk ? 200 : 503;
 
 	}
 
@@ -1042,6 +1053,7 @@ unsigned int EmbeddedNetworkController::handleControlPlaneHttpDELETE(
 
 					json network,member;
 					_db->get(nwid,network,address,member);
+                                        _db->eraseMember(nwid, address);
 
 					{
 						std::lock_guard<std::mutex> l(_memberStatus_l);
@@ -1510,13 +1522,13 @@ void EmbeddedNetworkController::_request(
 				const std::string ips = ipAssignments[i];
 				InetAddress ip(ips.c_str());
 
-				// IP assignments are only pushed if there is a corresponding local route. We also now get the netmask bits from
-				// this route, ignoring the netmask bits field of the assigned IP itself. Using that was worthless and a source
-				// of user error / poor UX.
 				int routedNetmaskBits = -1;
 				for(unsigned int rk=0;rk<nc->routeCount;++rk) {
-					if ( (!nc->routes[rk].via.ss_family) && (reinterpret_cast<const InetAddress *>(&(nc->routes[rk].target))->containsAddress(ip)) )
-						routedNetmaskBits = reinterpret_cast<const InetAddress *>(&(nc->routes[rk].target))->netmaskBits();
+					if (reinterpret_cast<const InetAddress *>(&(nc->routes[rk].target))->containsAddress(ip)) {
+						const int nb = (int)(reinterpret_cast<const InetAddress *>(&(nc->routes[rk].target))->netmaskBits());
+						if (nb > routedNetmaskBits)
+							routedNetmaskBits = nb;
+					}
 				}
 
 				if (routedNetmaskBits >= 0) {
@@ -1543,8 +1555,8 @@ void EmbeddedNetworkController::_request(
 				InetAddress ipRangeEnd(OSUtils::jsonString(pool["ipRangeEnd"],"").c_str());
 				if ( (ipRangeStart.ss_family == AF_INET6) && (ipRangeEnd.ss_family == AF_INET6) ) {
 					uint64_t s[2],e[2],x[2],xx[2];
-					ZT_FAST_MEMCPY(s,ipRangeStart.rawIpData(),16);
-					ZT_FAST_MEMCPY(e,ipRangeEnd.rawIpData(),16);
+					memcpy(s,ipRangeStart.rawIpData(),16);
+					memcpy(e,ipRangeEnd.rawIpData(),16);
 					s[0] = Utils::ntoh(s[0]);
 					s[1] = Utils::ntoh(s[1]);
 					e[0] = Utils::ntoh(e[0]);
@@ -1608,18 +1620,20 @@ void EmbeddedNetworkController::_request(
 				if ( (ipRangeStartIA.ss_family == AF_INET) && (ipRangeEndIA.ss_family == AF_INET) ) {
 					uint32_t ipRangeStart = Utils::ntoh((uint32_t)(reinterpret_cast<struct sockaddr_in *>(&ipRangeStartIA)->sin_addr.s_addr));
 					uint32_t ipRangeEnd = Utils::ntoh((uint32_t)(reinterpret_cast<struct sockaddr_in *>(&ipRangeEndIA)->sin_addr.s_addr));
+					
 					if ((ipRangeEnd < ipRangeStart)||(ipRangeStart == 0))
 						continue;
 					uint32_t ipRangeLen = ipRangeEnd - ipRangeStart;
-
+					
 					// Start with the LSB of the member's address
 					uint32_t ipTrialCounter = (uint32_t)(identity.address().toInt() & 0xffffffff);
 
 					for(uint32_t k=ipRangeStart,trialCount=0;((k<=ipRangeEnd)&&(trialCount < 1000));++k,++trialCount) {
 						uint32_t ip = (ipRangeLen > 0) ? (ipRangeStart + (ipTrialCounter % ipRangeLen)) : ipRangeStart;
 						++ipTrialCounter;
-						if ((ip & 0x000000ff) == 0x000000ff)
+						if ((ip & 0x000000ff) == 0x000000ff) {
 							continue; // don't allow addresses that end in .255
+						}
 
 						// Check if this IP is within a local-to-Ethernet routed network
 						int routedNetmaskBits = -1;
@@ -1657,7 +1671,7 @@ void EmbeddedNetworkController::_request(
 			}
 		}
 	}
-
+	
 	// Issue a certificate of ownership for all static IPs
 	if (nc->staticIpCount) {
 		nc->certificatesOfOwnership[0] = CertificateOfOwnership(nwid,now,identity.address(),1);

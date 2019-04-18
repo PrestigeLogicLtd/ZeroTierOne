@@ -17,6 +17,13 @@ DESTDIR?=
 
 include objects.mk
 ONE_OBJS+=osdep/LinuxEthernetTap.o
+ONE_OBJS+=osdep/LinuxNetLink.o
+
+NLTEST_OBJS+=osdep/LinuxNetLink.o node/InetAddress.o node/Utils.o node/Salsa20.o
+NLTEST_OBJS+=nltest.o
+
+# for central controller builds
+TIMESTAMP=$(shell date +"%Y%m%d%H%M")
 
 # Auto-detect miniupnpc and nat-pmp as well and use system libs if present,
 # otherwise build into binary as done on Mac and Windows.
@@ -42,8 +49,15 @@ endif
 # Trying to use dynamically linked libhttp-parser causes tons of compatibility problems.
 ONE_OBJS+=ext/http-parser/http_parser.o
 
+# Build with address sanitization library for advanced debugging (clang)
+ifeq ($(ZT_SANITIZE),1)
+	DEFS+=-fsanitize=address -DASAN_OPTIONS=symbolize=1
+endif
+ifeq ($(ZT_DEBUG_TRACE),1)
+	DEFS+=-DZT_DEBUG_TRACE
+endif
 ifeq ($(ZT_TRACE),1)
-	override DEFS+=-DZT_TRACE
+	DEFS+=-DZT_TRACE
 endif
 
 ifeq ($(ZT_RULES_ENGINE_DEBUGGING),1)
@@ -55,8 +69,8 @@ ifeq ($(ZT_SANITIZE),1)
 	SANFLAGS+=-fsanitize=address -DASAN_OPTIONS=symbolize=1
 endif
 ifeq ($(ZT_DEBUG),1)
-	override CFLAGS+=-Wall -Wno-deprecated -Werror -g -pthread $(INCLUDES) $(DEFS)
-	override CXXFLAGS+=-Wall -Wno-deprecated -Werror -g -std=c++11 -pthread $(INCLUDES) $(DEFS)
+	override CFLAGS+=-Wall -Wno-deprecated -g -pthread $(INCLUDES) $(DEFS)
+	override CXXFLAGS+=-Wall -Wno-deprecated -g -std=c++11 -pthread $(INCLUDES) $(DEFS)
 	ZT_TRACE=1
 	STRIP?=echo
 	# The following line enables optimization for the crypto code, since
@@ -79,7 +93,7 @@ endif
 ifeq ($(ZT_SYNOLOGY), 1)
 	override CFLAGS+=-fPIC
 	override CXXFLAGS+=-fPIC
-        override DEFS+=-D__SYNOLOGY__
+	override DEFS+=-D__SYNOLOGY__
 endif
 
 ifeq ($(ZT_TRACE),1)
@@ -88,6 +102,11 @@ endif
 
 ifeq ($(ZT_USE_TEST_TAP),1)
 	override DEFS+=-DZT_USE_TEST_TAP
+endif
+
+ifeq ($(ZT_VAULT_SUPPORT),1)
+	override DEFS+=-DZT_VAULT_SUPPORT=1
+	override LDLIBS+=-lcurl
 endif
 
 # Uncomment for gprof profile build
@@ -111,6 +130,12 @@ ifeq ($(CC_MACH),amd64)
 endif
 ifeq ($(CC_MACH),powerpc64le)
 	ZT_ARCHITECTURE=8
+	override DEFS+=-DZT_NO_TYPE_PUNNING
+endif
+ifeq ($(CC_MACH),powerpc)
+	ZT_ARCHITECTURE=8
+	override DEFS+=-DZT_NO_TYPE_PUNNING
+	override DEFS+=-DZT_NO_CAPABILITIES
 endif
 ifeq ($(CC_MACH),ppc64le)
 	ZT_ARCHITECTURE=8
@@ -170,10 +195,10 @@ ifeq ($(CC_MACH),armv7l)
 	override DEFS+=-DZT_NO_TYPE_PUNNING
 	ZT_USE_ARM32_NEON_ASM_CRYPTO=1
 endif
-ifeq ($(CC_MACH),armv7l)
-        ZT_ARCHITECTURE=3
+ifeq ($(CC_MACH),armv7hl)
+	ZT_ARCHITECTURE=3
 	override DEFS+=-DZT_NO_TYPE_PUNNING
-	ZT_USE_ARM32_NEON_ASM_SALSA2012=1
+	ZT_USE_ARM32_NEON_ASM_CRYPTO=1
 endif
 ifeq ($(CC_MACH),arm64)
 	ZT_ARCHITECTURE=4
@@ -197,10 +222,6 @@ ifeq ($(CC_MACH),mips64)
 endif
 ifeq ($(CC_MACH),mips64el)
 	ZT_ARCHITECTURE=6
-	override DEFS+=-DZT_NO_TYPE_PUNNING
-endif
-ifeq ($(CC_MACH),powerpc64le)
-	ZT_ARCHITECTURE=7
 	override DEFS+=-DZT_NO_TYPE_PUNNING
 endif
 
@@ -298,12 +319,17 @@ official:	FORCE
 	make -j4 ZT_OFFICIAL=1 all
 
 central-controller:	FORCE
-	cd ext/librethinkdbxx ; make
-	make -j4 LDLIBS="ext/librethinkdbxx/build/librethinkdb++.a" DEFS="-DZT_CONTROLLER_USE_RETHINKDB" ZT_OFFICIAL=1 ZT_USE_X64_ASM_ED25519=1 one
+	make -j4 LDLIBS="-L/usr/pgsql-10/lib/ -lpq -Lext/librabbitmq/centos_x64/lib/ -lrabbitmq" CXXFLAGS="-I/usr/pgsql-10/include -I./ext/librabbitmq/centos_x64/include -fPIC" DEFS="-DZT_CONTROLLER_USE_LIBPQ -DZT_CONTROLLER" ZT_OFFICIAL=1 ZT_USE_X64_ASM_ED25519=1 one
+
+central-controller-docker:	central-controller
+	docker build -t docker.zerotier.com/zerotier-central/ztcentral-controller:${TIMESTAMP} -f docker/Dockerfile . 
 
 debug:	FORCE
 	make ZT_DEBUG=1 one
 	make ZT_DEBUG=1 selftest
+
+nltest: $(NLTEST_OBJS)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o nltest $(NLTEST_OBJS) $(LDLIBS)
 
 # Note: keep the symlinks in /var/lib/zerotier-one to the binaries since these
 # provide backward compatibility with old releases where the binaries actually

@@ -1,6 +1,6 @@
 /*
  * ZeroTier One - Network Virtualization Everywhere
- * Copyright (C) 2011-2018  ZeroTier, Inc.
+ * Copyright (C) 2011-2019  ZeroTier, Inc.  https://www.zerotier.com/
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,7 +13,15 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --
+ *
+ * You can be released from the requirements of the license by purchasing
+ * a commercial license. Buying such a license is mandatory as soon as you
+ * develop commercial closed-source software that incorporates or links
+ * directly against ZeroTier software without disclosing the source code
+ * of your own application.
  */
 
 #include "FileDB.hpp"
@@ -63,14 +71,10 @@ FileDB::FileDB(EmbeddedNetworkController *const nc,const Identity &myId,const ch
 	}
 }
 
-FileDB::~FileDB()
-{
-}
+FileDB::~FileDB() {}
 
-bool FileDB::waitForReady()
-{
-	return true;
-}
+bool FileDB::waitForReady() { return true; }
+bool FileDB::isReady() { return true; }
 
 void FileDB::save(nlohmann::json *orig,nlohmann::json &record)
 {
@@ -91,13 +95,15 @@ void FileDB::save(nlohmann::json *orig,nlohmann::json &record)
 				nlohmann::json old;
 				get(nwid,old);
 
-				OSUtils::ztsnprintf(p1,sizeof(p1),"%s" ZT_PATH_SEPARATOR_S "%.16llx.json.new",_networksPath.c_str(),nwid);
-				OSUtils::ztsnprintf(p2,sizeof(p2),"%s" ZT_PATH_SEPARATOR_S "%.16llx.json",_networksPath.c_str(),nwid);
-				if (!OSUtils::writeFile(p1,OSUtils::jsonDump(record,-1)))
-					fprintf(stderr,"WARNING: controller unable to write to path: %s" ZT_EOL_S,p1);
-				OSUtils::rename(p1,p2);
+				if ((!old.is_object())||(old != record)) {
+					OSUtils::ztsnprintf(p1,sizeof(p1),"%s" ZT_PATH_SEPARATOR_S "%.16llx.json.new",_networksPath.c_str(),nwid);
+					OSUtils::ztsnprintf(p2,sizeof(p2),"%s" ZT_PATH_SEPARATOR_S "%.16llx.json",_networksPath.c_str(),nwid);
+					if (!OSUtils::writeFile(p1,OSUtils::jsonDump(record,-1)))
+						fprintf(stderr,"WARNING: controller unable to write to path: %s" ZT_EOL_S,p1);
+					OSUtils::rename(p1,p2);
 
-				_networkChanged(old,record,true);
+					_networkChanged(old,record,true);
+				}
 			}
 		} else if (objtype == "member") {
 			const uint64_t id = OSUtils::jsonIntHex(record["id"],0ULL);
@@ -106,17 +112,21 @@ void FileDB::save(nlohmann::json *orig,nlohmann::json &record)
 				nlohmann::json network,old;
 				get(nwid,network,id,old);
 
-				OSUtils::ztsnprintf(pb,sizeof(pb),"%s" ZT_PATH_SEPARATOR_S "%.16llx" ZT_PATH_SEPARATOR_S "member",_networksPath.c_str(),(unsigned long long)nwid);
-				OSUtils::ztsnprintf(p1,sizeof(p1),"%s" ZT_PATH_SEPARATOR_S "%.10llx.json.new",pb,(unsigned long long)id);
-				OSUtils::ztsnprintf(p2,sizeof(p2),"%s" ZT_PATH_SEPARATOR_S "%.10llx.json",pb,(unsigned long long)id);
-				if (!OSUtils::writeFile(p1,OSUtils::jsonDump(record,-1))) {
-					OSUtils::mkdir(pb);
-					if (!OSUtils::writeFile(p1,OSUtils::jsonDump(record,-1)))
-						fprintf(stderr,"WARNING: controller unable to write to path: %s" ZT_EOL_S,p1);
-				}
-				OSUtils::rename(p1,p2);
+				if ((!old.is_object())||(old != record)) {
+					OSUtils::ztsnprintf(pb,sizeof(pb),"%s" ZT_PATH_SEPARATOR_S "%.16llx" ZT_PATH_SEPARATOR_S "member",_networksPath.c_str(),(unsigned long long)nwid);
+					OSUtils::ztsnprintf(p1,sizeof(p1),"%s" ZT_PATH_SEPARATOR_S "%.10llx.json.new",pb,(unsigned long long)id);
+					if (!OSUtils::writeFile(p1,OSUtils::jsonDump(record,-1))) {
+						OSUtils::ztsnprintf(p2,sizeof(p2),"%s" ZT_PATH_SEPARATOR_S "%.16llx",_networksPath.c_str(),(unsigned long long)nwid);
+						OSUtils::mkdir(p2);
+						OSUtils::mkdir(pb);
+						if (!OSUtils::writeFile(p1,OSUtils::jsonDump(record,-1)))
+							fprintf(stderr,"WARNING: controller unable to write to path: %s" ZT_EOL_S,p1);
+					}
+					OSUtils::ztsnprintf(p2,sizeof(p2),"%s" ZT_PATH_SEPARATOR_S "%.10llx.json",pb,(unsigned long long)id);
+					OSUtils::rename(p1,p2);
 
-				_memberChanged(old,record,true);
+					_memberChanged(old,record,true);
+				}
 			}
 		} else if (objtype == "trace") {
 			const std::string id = record["id"];
@@ -134,12 +144,24 @@ void FileDB::eraseNetwork(const uint64_t networkId)
 	get(networkId,network);
 	char p[16384];
 	OSUtils::ztsnprintf(p,sizeof(p),"%s" ZT_PATH_SEPARATOR_S "%.16llx.json",_networksPath.c_str(),networkId);
-	OSUtils::rm(p);
+
+	if (OSUtils::fileExists(p,false)){
+	  OSUtils::rm(p);
+        }
 	_networkChanged(network,nullJson,true);
 }
 
 void FileDB::eraseMember(const uint64_t networkId,const uint64_t memberId)
 {
+	nlohmann::json network,member,nullJson;
+	get(networkId,network);
+        get(memberId,member);
+	char p[16384];
+	OSUtils::ztsnprintf(p,sizeof(p),"%s" ZT_PATH_SEPARATOR_S "%.16llx" ZT_PATH_SEPARATOR_S "member" ZT_PATH_SEPARATOR_S "%.10llx.json",_networksPath.c_str(),networkId,memberId);
+	if (OSUtils::fileExists(p,false)){
+	    OSUtils::rm(p);
+	}
+	_memberChanged(member,nullJson,true);
 }
 
 void FileDB::nodeIsOnline(const uint64_t networkId,const uint64_t memberId,const InetAddress &physicalAddress)

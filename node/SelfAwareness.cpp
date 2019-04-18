@@ -1,6 +1,6 @@
 /*
  * ZeroTier One - Network Virtualization Everywhere
- * Copyright (C) 2011-2018  ZeroTier, Inc.  https://www.zerotier.com/
+ * Copyright (C) 2011-2019  ZeroTier, Inc.  https://www.zerotier.com/
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
  *
  * --
  *
@@ -124,6 +124,7 @@ void SelfAwareness::clean(int64_t now)
 	}
 }
 
+#if 0
 std::vector<InetAddress> SelfAwareness::getSymmetricNatPredictions()
 {
 	/* This is based on ideas and strategies found here:
@@ -145,7 +146,7 @@ std::vector<InetAddress> SelfAwareness::getSymmetricNatPredictions()
 	 *
 	 * Since flows are encrypted and authenticated they could not actually
 	 * read or modify traffic, but they could gather meta-data for forensics
-	 * purpsoes or use this as a DOS attack vector. */
+	 * purposes or use this as a DOS attack vector. */
 
 	std::map< uint32_t,unsigned int > maxPortByIp;
 	InetAddress theOneTrueSurface;
@@ -206,5 +207,6 @@ std::vector<InetAddress> SelfAwareness::getSymmetricNatPredictions()
 
 	return r;
 }
+#endif
 
 } // namespace ZeroTier

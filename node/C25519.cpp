@@ -15,6 +15,8 @@ Derived from public domain code by D. J. Bernstein.
 #include "C25519.hpp"
 #include "SHA512.hpp"
 #include "Buffer.hpp"
+#include "Hashtable.hpp"
+#include "Mutex.hpp"
 
 #ifdef __WINDOWS__
 #pragma warning(disable: 4146)
@@ -792,7 +794,6 @@ void sc25519_mul(sc25519 *r, const sc25519 *x, const sc25519 *y)
 		for(j=0;j<32;j++)
 			t[i+j] += x->v[i] * y->v[j];
 
-	/* Reduce coefficients */
 	for(i=0;i<63;i++)
 	{
 		carry = t[i] >> 8;
@@ -1996,7 +1997,7 @@ void get_hram(unsigned char *hram, const unsigned char *sm, const unsigned char 
 } // anonymous namespace
 
 #ifdef ZT_USE_FAST_X64_ED25519
-extern "C" void ed25519_amd64_asm_sign(const unsigned char *sk,const unsigned char *pk,const unsigned char *m,const unsigned int mlen,unsigned char *sig);
+extern "C" void ed25519_amd64_asm_sign(const unsigned char *sk,const unsigned char *pk,const unsigned char *digest,unsigned char *sig);
 #endif
 
 namespace ZeroTier {
@@ -2019,8 +2020,11 @@ void C25519::agree(const C25519::Private &mine,const C25519::Public &their,void 
 
 void C25519::sign(const C25519::Private &myPrivate,const C25519::Public &myPublic,const void *msg,unsigned int len,void *signature)
 {
+	unsigned char digest[64]; // we sign the first 32 bytes of SHA-512(msg)
+	SHA512::hash(digest,msg,len);
+
 #ifdef ZT_USE_FAST_X64_ED25519
-	ed25519_amd64_asm_sign(myPrivate.data + 32,myPublic.data + 32,(const unsigned char *)msg,len,(unsigned char *)signature);
+	ed25519_amd64_asm_sign(myPrivate.data + 32,myPublic.data + 32,digest,(unsigned char *)signature);
 #else
 	sc25519 sck, scs, scsk;
 	ge25519 ger;
@@ -2030,9 +2034,6 @@ void C25519::sign(const C25519::Private &myPrivate,const C25519::Public &myPubli
 	unsigned char hmg[crypto_hash_sha512_BYTES];
 	unsigned char hram[crypto_hash_sha512_BYTES];
 	unsigned char *sig = (unsigned char *)signature;
-	unsigned char digest[64]; // we sign the first 32 bytes of SHA-512(msg)
-
-	SHA512::hash(digest,msg,len);
 
 	SHA512::hash(extsk,myPrivate.data + 32,32);
 	extsk[0] &= 248;
@@ -2071,18 +2072,17 @@ void C25519::sign(const C25519::Private &myPrivate,const C25519::Public &myPubli
 
 bool C25519::verify(const C25519::Public &their,const void *msg,unsigned int len,const void *signature)
 {
+	const unsigned char *const sig = (const unsigned char *)signature;
+	unsigned char digest[64]; // we sign the first 32 bytes of SHA-512(msg)
+	SHA512::hash(digest,msg,len);
+	if (!Utils::secureEq(sig + 64,digest,32))
+		return false;
+
 	unsigned char t2[32];
 	ge25519 get1, get2;
 	sc25519 schram, scs;
 	unsigned char hram[crypto_hash_sha512_BYTES];
 	unsigned char m[96];
-	unsigned char digest[64]; // we sign the first 32 bytes of SHA-512(msg)
-	const unsigned char *sig = (const unsigned char *)signature;
-
-	// First check the message's integrity
-	SHA512::hash(digest,msg,len);
-	if (!Utils::secureEq(sig + 64,digest,32))
-		return false;
 
 	if (ge25519_unpackneg_vartime(&get1,their.data + 32))
 		return false;

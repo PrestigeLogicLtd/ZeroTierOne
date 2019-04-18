@@ -1,6 +1,6 @@
 /*
  * ZeroTier One - Network Virtualization Everywhere
- * Copyright (C) 2011-2018  ZeroTier, Inc.
+ * Copyright (C) 2011-2019  ZeroTier, Inc.  https://www.zerotier.com/
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -13,7 +13,15 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ *
+ * --
+ *
+ * You can be released from the requirements of the license by purchasing
+ * a commercial license. Buying such a license is mandatory as soon as you
+ * develop commercial closed-source software that incorporates or links
+ * directly against ZeroTier software without disclosing the source code
+ * of your own application.
  */
 
 #ifndef ZT_CONTROLLER_DB_HPP
@@ -34,8 +42,6 @@
 #include <atomic>
 
 #include "../ext/json/json.hpp"
-
-#define ZT_CONTROLLER_RETHINKDB_COMMIT_THREADS 2
 
 namespace ZeroTier
 {
@@ -82,6 +88,7 @@ public:
 	virtual ~DB();
 
 	virtual bool waitForReady() = 0;
+	virtual bool isReady() = 0;
 
 	inline bool hasNetwork(const uint64_t networkId) const
 	{
